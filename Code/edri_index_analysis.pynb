@@ -1,0 +1,279 @@
+# European Digital Readiness Index (EDRI)
+# Data Analysis and Visualisation CA1
+
+# -----------------------------
+# 1. Import libraries
+# -----------------------------
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+
+
+# -----------------------------
+# 2. Load dataset
+# -----------------------------
+
+# Your CSV should have these columns:
+# Country, Internet_Access, Digital_Skills, EGovernment_Use, Cloud_Computing
+
+file_path = "edri_data.csv"
+df = pd.read_csv(file_path)
+
+print("Original dataset:")
+print(df.head())
+
+
+# -----------------------------
+# 3. Check dataset structure
+# -----------------------------
+
+print("\nDataset information:")
+print(df.info())
+
+print("\nSummary statistics:")
+print(df.describe())
+
+print("\nMissing values before imputation:")
+print(df.isnull().sum())
+
+
+# -----------------------------
+# 4. Imputation of missing data
+# -----------------------------
+
+indicator_columns = [
+    "Internet_Access",
+    "Digital_Skills",
+    "EGovernment_Use",
+    "Cloud_Computing"
+]
+
+# Fill missing numeric values with the mean of each column
+for col in indicator_columns:
+    df[col] = df[col].fillna(df[col].mean())
+
+print("\nMissing values after imputation:")
+print(df.isnull().sum())
+
+
+# -----------------------------
+# 5. Correlation analysis
+# -----------------------------
+
+correlation_matrix = df[indicator_columns].corr()
+
+print("\nCorrelation matrix:")
+print(correlation_matrix)
+
+plt.figure(figsize=(8, 6))
+plt.imshow(correlation_matrix)
+plt.colorbar(label="Correlation")
+plt.xticks(range(len(indicator_columns)), indicator_columns, rotation=45, ha="right")
+plt.yticks(range(len(indicator_columns)), indicator_columns)
+plt.title("Correlation Heatmap of Digital Readiness Indicators")
+plt.tight_layout()
+plt.savefig("correlation_heatmap.png", dpi=300)
+plt.show()
+
+
+# -----------------------------
+# 6. Normalisation
+# -----------------------------
+
+# Min-max normalisation converts all indicators to a 0-100 scale.
+# Higher values are better for all selected indicators.
+
+scaler = MinMaxScaler(feature_range=(0, 100))
+normalised_values = scaler.fit_transform(df[indicator_columns])
+
+normalised_df = pd.DataFrame(
+    normalised_values,
+    columns=[col + "_Norm" for col in indicator_columns]
+)
+
+df = pd.concat([df, normalised_df], axis=1)
+
+print("\nNormalised data:")
+print(df[["Country"] + list(normalised_df.columns)].head())
+
+
+# -----------------------------
+# 7. Weighting and aggregation
+# -----------------------------
+
+# Equal weighting is used:
+# Connectivity = 25%
+# Digital Skills = 25%
+# E-Government = 25%
+# Business Digitalisation = 25%
+
+df["Connectivity_SubIndex"] = df["Internet_Access_Norm"]
+df["DigitalSkills_SubIndex"] = df["Digital_Skills_Norm"]
+df["EGovernment_SubIndex"] = df["EGovernment_Use_Norm"]
+df["BusinessDigitalisation_SubIndex"] = df["Cloud_Computing_Norm"]
+
+df["EDRI_Score"] = (
+    0.25 * df["Connectivity_SubIndex"] +
+    0.25 * df["DigitalSkills_SubIndex"] +
+    0.25 * df["EGovernment_SubIndex"] +
+    0.25 * df["BusinessDigitalisation_SubIndex"]
+)
+
+# Rank countries from highest to lowest score
+df["Rank"] = df["EDRI_Score"].rank(ascending=False, method="min").astype(int)
+df = df.sort_values(by="EDRI_Score", ascending=False)
+
+print("\nFinal EDRI ranking:")
+print(df[["Rank", "Country", "EDRI_Score"]])
+
+
+# -----------------------------
+# 8. PCA multivariate analysis
+# -----------------------------
+
+# Standardisation is used before PCA because PCA is affected by scale.
+standard_scaler = StandardScaler()
+scaled_data = standard_scaler.fit_transform(df[indicator_columns])
+
+pca = PCA()
+pca_result = pca.fit_transform(scaled_data)
+
+explained_variance = pca.explained_variance_ratio_
+
+print("\nPCA explained variance ratio:")
+for i, var in enumerate(explained_variance, start=1):
+    print(f"PC{i}: {var:.4f}")
+
+plt.figure(figsize=(7, 5))
+plt.plot(range(1, len(explained_variance) + 1), explained_variance, marker="o")
+plt.xlabel("Principal Component")
+plt.ylabel("Explained Variance Ratio")
+plt.title("PCA Scree Plot")
+plt.xticks(range(1, len(explained_variance) + 1))
+plt.tight_layout()
+plt.savefig("pca_scree_plot.png", dpi=300)
+plt.show()
+
+# Add first two principal components to dataframe
+if pca_result.shape[1] >= 2:
+    df["PC1"] = pca_result[:, 0]
+    df["PC2"] = pca_result[:, 1]
+
+    plt.figure(figsize=(8, 6))
+    plt.scatter(df["PC1"], df["PC2"])
+    for i, country in enumerate(df["Country"]):
+        plt.annotate(country, (df["PC1"].iloc[i], df["PC2"].iloc[i]), fontsize=8)
+    plt.xlabel("Principal Component 1")
+    plt.ylabel("Principal Component 2")
+    plt.title("PCA Plot of Countries")
+    plt.tight_layout()
+    plt.savefig("pca_country_plot.png", dpi=300)
+    plt.show()
+
+
+# -----------------------------
+# 9. Clustering analysis
+# -----------------------------
+
+# K-means clustering is used to group countries with similar digital readiness profiles.
+
+cluster_data = df[[
+    "Connectivity_SubIndex",
+    "DigitalSkills_SubIndex",
+    "EGovernment_SubIndex",
+    "BusinessDigitalisation_SubIndex"
+]]
+
+# Try different values of k and calculate silhouette scores
+silhouette_scores = {}
+for k in range(2, 7):
+    kmeans_temp = KMeans(n_clusters=k, random_state=42, n_init=10)
+    labels_temp = kmeans_temp.fit_predict(cluster_data)
+    score = silhouette_score(cluster_data, labels_temp)
+    silhouette_scores[k] = score
+
+print("\nSilhouette scores:")
+for k, score in silhouette_scores.items():
+    print(f"k={k}: {score:.4f}")
+
+# Choose k=3 for simple interpretation: High, Medium, Low digital readiness
+kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+df["Cluster"] = kmeans.fit_predict(cluster_data)
+
+# Label clusters based on average EDRI score
+cluster_means = df.groupby("Cluster")["EDRI_Score"].mean().sort_values(ascending=False)
+cluster_labels = {}
+labels = ["High Digital Readiness", "Medium Digital Readiness", "Low Digital Readiness"]
+
+for label, cluster_id in zip(labels, cluster_means.index):
+    cluster_labels[cluster_id] = label
+
+df["Cluster_Label"] = df["Cluster"].map(cluster_labels)
+
+print("\nCountries by cluster:")
+print(df[["Country", "EDRI_Score", "Cluster_Label"]].sort_values(by="EDRI_Score", ascending=False))
+
+
+# -----------------------------
+# 10. Visualisation of final results
+# -----------------------------
+
+# Bar chart of final index ranking
+plt.figure(figsize=(10, 8))
+plt.barh(df["Country"], df["EDRI_Score"])
+plt.xlabel("EDRI Score")
+plt.ylabel("Country")
+plt.title("European Digital Readiness Index Ranking")
+plt.gca().invert_yaxis()
+plt.tight_layout()
+plt.savefig("edri_country_ranking.png", dpi=300)
+plt.show()
+
+# Sub-index comparison for top 10 countries
+top_10 = df.head(10)
+
+plt.figure(figsize=(10, 6))
+plt.plot(top_10["Country"], top_10["Connectivity_SubIndex"], marker="o", label="Connectivity")
+plt.plot(top_10["Country"], top_10["DigitalSkills_SubIndex"], marker="o", label="Digital Skills")
+plt.plot(top_10["Country"], top_10["EGovernment_SubIndex"], marker="o", label="E-Government")
+plt.plot(top_10["Country"], top_10["BusinessDigitalisation_SubIndex"], marker="o", label="Business Digitalisation")
+plt.xticks(rotation=45, ha="right")
+plt.ylabel("Sub-index Score")
+plt.title("Sub-index Scores for Top 10 Countries")
+plt.legend()
+plt.tight_layout()
+plt.savefig("top_10_subindices.png", dpi=300)
+plt.show()
+
+# Cluster visualisation using PCA axes if available
+if "PC1" in df.columns and "PC2" in df.columns:
+    plt.figure(figsize=(8, 6))
+    for cluster_label in df["Cluster_Label"].unique():
+        subset = df[df["Cluster_Label"] == cluster_label]
+        plt.scatter(subset["PC1"], subset["PC2"], label=cluster_label)
+
+    for i, country in enumerate(df["Country"]):
+        plt.annotate(country, (df["PC1"].iloc[i], df["PC2"].iloc[i]), fontsize=8)
+
+    plt.xlabel("Principal Component 1")
+    plt.ylabel("Principal Component 2")
+    plt.title("Country Clusters Based on Digital Readiness")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("country_clusters.png", dpi=300)
+    plt.show()
+
+
+# -----------------------------
+# 11. Export final results
+# -----------------------------
+
+df.to_csv("edri_final_results.csv", index=False)
+
+print("\nFinal results exported to edri_final_results.csv")
+print("Charts saved as PNG files.")
